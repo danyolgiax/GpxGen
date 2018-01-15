@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>GpxGen</title>
+
+	<script src="https://www.gstatic.com/charts/loader.js"></script>
+	<script type="text/javascript" src="http://maps.googleapis.com/maps/api/js?v=3.29&libraries=places"></script>
+    <script type="text/javascript" src="vkbeautify.0.99.00.beta.js"></script>
+    <script type="text/javascript" src="FileSaver.min.js"></script>
+	<style>
+		html, body, #map {
+			width: 100%;
+			height: 100%;
+			margin: 0;
+			padding: 0;
+		}
+		#map {
+			position: relative;
+		}
+	</style>
+  </head>
+  <body onload="init();">
+  
+    <div id="map"></div>
+	
+	<div style="position:absolute; top:120px; left:10px; z-index:1000;">
+		<label for="txtName">Name</label><br/>
+		<input type="text" id="txtName" /><br/>
+		<label for="txtName">Description</label><br/>
+		<input type="text" id="txtDescription" /><br/>
+		
+		<p>Total Distance: <span id="total"></span></p><br/>
+		<div id="elevation_chart"></div>
+		<button onclick="generateGpx()"> Generate GPX</button><br/>
+		<button onclick="clearAll()"> Clear</button><br/>
+	</div>
+	
+    <script type="text/javascript">
+      var directionsService;
+	  var elevationService;
+      var directionsDisplay;
+      var initMarker;
+	  var elevationServiceResult;
+	  
+	  
+	  google.charts.load('current', {'packages': ['columnchart']});
+   
+      function init() {
+	  
+        directionsService = new google.maps.DirectionsService();
+		elevationService = new google.maps.ElevationService();
+		
+        var latlng = new google.maps.LatLng('41.9006139', '12.4927282');
+        var myOptions = {
+          zoom: 6,
+          center: latlng,
+          mapTypeId: google.maps.MapTypeId.ROADMAP
+        };
+        var map = new google.maps.Map(document.getElementById('map'), myOptions);
+		
+		 directionsDisplay = new google.maps.DirectionsRenderer({
+              'draggable': true
+            });
+        directionsDisplay.setMap(map);
+			
+		directionsDisplay.addListener('directions_changed', function() {
+          computeTotalDistance(directionsDisplay.getDirections());
+		 
+		 
+		  
+		   elevationService.getElevationAlongPath({
+          'path': directionsDisplay.directions.routes[directionsDisplay.getRouteIndex()].overview_path,
+          'samples': 300
+        }, function (result, status) {
+		
+		
+				var chartDiv = document.getElementById('elevation_chart');
+				if (status !== 'OK') {
+				  chartDiv.innerHTML = 'Cannot show elevation: request failed because ' +
+					  status;
+				  return;
+				}
+
+				elevationServiceResult=result;
+				
+				var chart = new google.visualization.ColumnChart(chartDiv);
+
+				var elevationMarker;
+				google.visualization.events.addListener(chart, 'onmouseover', function (e) {
+					
+					var lat=data.getValue(e.row, 0);
+					var lng=data.getValue(e.row, 1);
+					
+					if(elevationMarker){
+						elevationMarker.setMap(null);
+					}
+					elevationMarker = new google.maps.Marker({
+					  position: {'lat': lat, 'lng': lng},
+					  map: map
+					});
+				});
+				
+				google.visualization.events.addListener(chart, 'onmouseout', function (e) {
+					
+					if(elevationMarker){
+						elevationMarker.setMap(null);
+					}
+				});
+				
+				var data = new google.visualization.DataTable();
+				data.addColumn('number', 'Lat');
+				data.addColumn('number', 'Lng');
+				data.addColumn('number', 'Elevation');
+				for (var i = 0; i < result.length; i++) {
+				  data.addRow([result[i].location.lat(),result[i].location.lng(), result[i].elevation]);
+				  //data.addRow([result[i].elevation]);
+				
+				}
+
+				 var view = new google.visualization.DataView(data);
+				view.setColumns([2]);
+				
+				chart.draw(view, {
+				  height: 150,
+				  'width':300,
+				  legend: 'none',
+				  titleY: 'Elevation (m)'
+				});
+			  });
+		
+        });
+		
+        google.maps.event.addListener(map, "click", function(event) {
+          if (!initMarker) {
+		  
+            initMarker = new google.maps.Marker({
+              position: event.latLng,
+              map: map
+            });
+			
+          } else {
+			
+            directionsService.route({
+              'origin': initMarker.getPosition(),
+              'destination': event.latLng,
+              'travelMode': google.maps.DirectionsTravelMode.WALKING
+            }, function(result, status) {
+              if (status == 'OK') {
+				
+                directionsDisplay.setDirections(result);
+				  directionsDisplay.setMap(map);
+                initMarker.setMap(null);
+				
+              };
+            });
+			
+          }
+        });
+      }
+	  
+	  function computeTotalDistance(result) {
+        var total = 0;
+        var myroute = result.routes[0];
+        for (var i = 0; i < myroute.legs.length; i++) {
+          total += myroute.legs[i].distance.value;
+        }
+        total = total / 1000;
+        document.getElementById('total').innerHTML = total + ' km';
+      }
+	  
+	  function clearAll() {
+		  
+		  elevationServiceResult=null;
+		
+        directionsDisplay.setMap(null);
+		  document.getElementById('total').innerHTML = '';
+		  document.getElementById('elevation_chart').innerHTML = '';
+		  initMarker=null;
+	  }
+	  
+      function generateGpx() {
+	  
+	    var txtName = document.getElementById('txtName');
+        var name=txtName.value;
+		var txtDescription = document.getElementById('txtDescription');
+        var desc=txtDescription.value;
+		
+        var gpxHeader="<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+		              "<gpx version=\"1.0\" creator=\"Create GPX Route with Google Maps API v3\" xmlns=\"http://www.topografix.com/GPX/1/0\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://www.topografix.com/GPX/1/0 http://www.topografix.com/GPX/1/0/gpx.xsd\">" +
+					  "<desc>"+desc+"</desc>" + 
+					  "<trk>" +
+					  "<name>"+name+"</name>" +
+					  "<trkseg>";
+		
+            var gpxInfo=gpxHeader;
+            for (var i = 0; i < elevationServiceResult.length; i++) {
+              var lat=elevationServiceResult[i].location.lat();
+              var lng=elevationServiceResult[i].location.lng();
+              gpxInfo+="<trkpt lat=\""+lat+"\" lon=\""+lng+"\"><ele>"+elevationServiceResult[i].elevation+"</ele></trkpt>"
+            }
+            gpxInfo+="</trkseg></trk></gpx>";
+			
+            var prettyXml=vkbeautify.xml(gpxInfo);
+            
+			var blob = new Blob([prettyXml], {
+              type: "text/plain;charset=utf-8;",
+            });
+			
+			var filename = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+			
+            saveAs(blob, filename + ".gpx");
+
+      }
+    </script>    
+
+  </body>
+</html>
